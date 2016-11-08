@@ -208,7 +208,7 @@ class CsvSeeder extends Seeder
         $this->delimiter       = $delimiter ?: $this->delimiter;
         $this->aliases         = $aliases ?: $this->aliases;
         $this->mapping         = $mapping ?: $this->mapping;
-        $this->insert_callback = $insert_callback;
+        $this->insert_callback = $insert_callback ?: $this->insert_callback ; 
 
         $this->runSeeder();
     }
