@@ -98,6 +98,12 @@ class CsvSeeder extends Seeder
     public $aliases = [];
 
     /**
+     * Allow zero-length string.
+     *
+     * By default zero-length string are converted to null
+     */
+    public $allow_zl = false;
+    /**
      * Specifies DB columns that should have their values hashed prior to insertion.
      * Override this as needed.
      *
@@ -282,6 +288,7 @@ class CsvSeeder extends Seeder
         $this->delimiter   = ',';
         $this->offset_rows = 0;
         $this->log_prefix  = '';
+        $this->allow_zl    = false;
 
         $this->insert_chunk_size = 50;
         $this->insert_callback   = null;
@@ -517,7 +524,7 @@ class CsvSeeder extends Seeder
         $columns = new Collection();
         // apply mapping to a given row
         foreach ($mapping as $csv_index => $column_name) {
-            $column_value = ( array_key_exists($csv_index, $row) && isset( $row[$csv_index] ) && $row[$csv_index] !== '')
+            $column_value = ( array_key_exists($csv_index, $row) && isset($row[$csv_index]) && ($this->allow_zl || $row[$csv_index] !== ''))
                 ? $row[$csv_index]
                 : null;
             $columns->put($column_name, $column_value);
