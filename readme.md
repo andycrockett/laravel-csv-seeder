@@ -184,6 +184,7 @@ Note, `$chunk` and `$row` are instances of `\Illuminate\Support\Collection` so y
  - `mapping` (array) Associative array of csvColumnIndex => csvColumnName. See examples for details. If not specified, the first row (after offset) of the CSV will be used as the mapping.
  - `aliases` (array) Associative array of csvColumnName => aliasColumnName. See examples for details. Allows for flexible CSV column names.
  - `hashable` (string|array 'password') Hashes the specified field(s) using `bcrypt`. Useful if you are importing users and need their passwords hashed. Note: This is EXTREMELY SLOW, large CSVs will take time to import.
+ - `allow_zl` (bool false) - Do not convert zero-length strings to null.
  - `insert_chunk_size` (int 50) An insert callback will trigger every `insert_chunk_size` rows while reading the CSV.
  - `insert_callback` (callable) - Override the default insert callback with your own. Callback must accept a `Collection` of rows ($chunk).
  - `console_logs` (bool true) - Show messages in the console. (neglible performance impact)
