@@ -161,6 +161,14 @@ class CsvSeeder extends Seeder
     public $log_prefix = '';
 
     /**
+     * Array of columns to encrypt using native Laravel encryption
+     *
+     * @var array
+     */
+
+    public $insert_encrypt = [];
+
+    /**
      * Holder for columns read from the DB table
      *
      * @var array
@@ -169,6 +177,15 @@ class CsvSeeder extends Seeder
 
     /**
      * CsvSeeder constructor.
+     *
+     * @param null $filename
+     * @param null $table
+     * @param null $model
+     * @param string $delimiter
+     * @param null $mapping
+     * @param null $aliases
+     * @param null $insert_callback
+     * @param null $insert_encrypt
      */
     public function __construct(
         $filename = null,
@@ -177,10 +194,12 @@ class CsvSeeder extends Seeder
         $delimiter = null,
         $mapping = null,
         $aliases = null,
-        $insert_callback = null
+        $insert_callback = null,
+        $insert_encrypt = null
     ) {
-        if (!is_null($filename)) {
-            $this->seedFromCSV($filename, $table, $model, $delimiter, $mapping, $aliases, $insert_callback);
+        if ( ! is_null($filename)) {
+            $this->seedFromCSV($filename, $table, $model, $delimiter, $mapping, $aliases, $insert_callback,
+                $insert_encrypt);
         }
     }
 
@@ -192,7 +211,16 @@ class CsvSeeder extends Seeder
         $this->runSeeder();
     }
 
-
+    /**
+     * @param null $filename
+     * @param null $table
+     * @param null $model
+     * @param string $delimiter
+     * @param null $aliases
+     * @param null $mapping
+     * @param null $insert_callback
+     * @param null $insert_encrypt
+     */
     public function seedFromCSV(
         $filename = null,
         $table = null,
@@ -200,7 +228,8 @@ class CsvSeeder extends Seeder
         $delimiter = null,
         $aliases = null,
         $mapping = null,
-        $insert_callback = null
+        $insert_callback = null,
+        $insert_encrypt = null
     ) {
         $this->filename        = $filename ?: $this->filename;
         $this->table           = $table ?: $this->table;
@@ -208,7 +237,8 @@ class CsvSeeder extends Seeder
         $this->delimiter       = $delimiter ?: $this->delimiter;
         $this->aliases         = $aliases ?: $this->aliases;
         $this->mapping         = $mapping ?: $this->mapping;
-        $this->insert_callback = $insert_callback ?: $this->insert_callback ; 
+        $this->insert_callback = $insert_callback ?: $this->insert_callback;
+        $this->insert_encrypt  = $insert_encrypt ?: $this->insert_encrypt;
 
         $this->runSeeder();
     }
@@ -216,7 +246,7 @@ class CsvSeeder extends Seeder
     public function runSeeder()
     {
         // abort for missing filename
-        if (empty( $this->filename )) {
+        if (empty($this->filename)) {
             $this->log('CSV filename was not specified.', 'critical');
             $this->console('CSV filename was not specified.', 'error');
 
@@ -224,7 +254,7 @@ class CsvSeeder extends Seeder
         }
 
         // resolve the model
-        if (!empty( $this->model )) {
+        if ( ! empty($this->model)) {
             if ($this->resolveModel() === false) {
                 $this->log("$this->model could not be resolved.", 'warning');
                 $this->console("$this->model could not be resolved.", 'error');
@@ -296,7 +326,7 @@ class CsvSeeder extends Seeder
      */
     public function openCSV($filename)
     {
-        if (!file_exists($filename) || !is_readable($filename)) {
+        if ( ! file_exists($filename) || ! is_readable($filename)) {
             return false;
         }
 
@@ -320,8 +350,7 @@ class CsvSeeder extends Seeder
 
         // abort for bad CSV
         if ($handle === false) {
-            $this->console(
-                "CSV file {$this->filename} does not exist or is not readable.", 'error');
+            $this->console("CSV file {$this->filename} does not exist or is not readable.", 'error');
 
             return;
         }
@@ -330,47 +359,48 @@ class CsvSeeder extends Seeder
         $skipped   = 0; // rows that were skipped
         $failed    = 0; // chunk inserts that failed
         $chunk     = new Collection(); // accumulator for rows until the chunk_limit is reached
-        $mapping   = empty( $this->mapping ) ? [] : $this->cleanMapping($this->mapping);
+        $mapping   = empty($this->mapping) ? [] : $this->cleanMapping($this->mapping);
+        $encrypt   = empty($this->insert_encrypt) ? [] : $this->insert_encrypt;
         $offset    = $this->offset_rows;
 
-        while (( $row = fgetcsv($handle, 0, $this->delimiter) ) !== false) {
+        while (($row = fgetcsv($handle, 0, $this->delimiter)) !== false) {
 
             if ($row_count == 0 && $offset == 0) {
                 // Resolve mapping from the first row
-                if (empty( $mapping )) {
+                if (empty($mapping)) {
                     $mapping = $this->cleanMapping($row);
                 }
 
                 // Automagically skip the header row
-                if (!empty( $mapping ) && $this->skip_header_row) {
+                if ( ! empty($mapping) && $this->skip_header_row) {
                     if ($this->isHeaderRow($row, $mapping)) {
-                        $offset ++;
+                        $offset++;
                     }
                 }
             }
 
             // Skip the offset rows
             while ($offset > 0) {
-                $offset --;
+                $offset--;
                 continue 2;
             }
 
             // Resolve mapping using the first row after offset
-            if (empty( $mapping )) {
+            if (empty($mapping)) {
                 $mapping = $this->cleanMapping($row);
                 // abort if mapping empty
-                if (empty( $mapping )) {
+                if (empty($mapping)) {
                     $this->console("The mapping columns do not exist on the DB table.", 'error');
 
                     return;
                 }
             }
 
-            $row = $this->parseRow($row, $mapping);
+            $row = $this->parseRow($row, $mapping, $encrypt);
 
             // Insert only non-empty rows from the csv file
             if ($row->isEmpty()) {
-                $skipped ++;
+                $skipped++;
                 continue;
             }
 
@@ -378,11 +408,13 @@ class CsvSeeder extends Seeder
 
             // Chunk size reached, insert and clear the chunk
             if (count($chunk) >= $this->insert_chunk_size) {
-                if (!$this->insert($chunk)) $failed ++;
+                if ( ! $this->insert($chunk)) {
+                    $failed++;
+                }
                 $chunk = new Collection();
             }
 
-            $row_count ++;
+            $row_count++;
         }
 
         // convert failed chunks to failed rows
@@ -390,15 +422,21 @@ class CsvSeeder extends Seeder
 
         // Insert any leftover rows from the last chunk
         if (count($chunk) > 0) {
-            if (!$this->insert($chunk)) $failed += count($chunk);
+            if ( ! $this->insert($chunk)) {
+                $failed += count($chunk);
+            }
         }
 
         fclose($handle);
 
         // log results to console
-        $log = 'Imported ' . ( $row_count - $skipped - $failed ) . ' of ' . $row_count . ' rows. ';
-        if ($skipped > 0) $log .= $skipped . " empty rows. ";
-        if ($failed > 0) $log .= "<error>" . $failed . " failed rows.</error>";
+        $log = 'Imported ' . ($row_count - $skipped - $failed) . ' of ' . $row_count . ' rows. ';
+        if ($skipped > 0) {
+            $log .= $skipped . " empty rows. ";
+        }
+        if ($failed > 0) {
+            $log .= "<error>" . $failed . " failed rows.</error>";
+        }
 
         $this->console($log);
     }
@@ -435,7 +473,7 @@ class CsvSeeder extends Seeder
         return is_object($this->insert_callback)
             ? $this->insert_callback
             : function (Collection $chunk) {
-                if (empty( $this->model )) {
+                if (empty($this->model)) {
                     // use DB table insert method
                     DB::table($this->table)->insert($chunk->toArray());
                 } else {
@@ -466,7 +504,7 @@ class CsvSeeder extends Seeder
      */
     public function truncateTable($ignore_foreign_keys = false)
     {
-        if (empty( $this->table )) {
+        if (empty($this->table)) {
             if ($this->resolveTable() === false) {
                 $this->log('Unable to truncate table: Table not specified.', 'warning');
                 $this->console('Unable to truncate table: Table not specified.', 'error');
@@ -507,19 +545,27 @@ class CsvSeeder extends Seeder
     /**
      * Parse a CSV row into a DB insertable array
      *
-     * @param array $row     List of CSV columns
+     * @param array $row List of CSV columns
      * @param array $mapping Array of csvCol => dbCol
+     * @param array $encrypt - Array of column names to encrypt
      *
      * @return Collection
      */
-    protected function parseRow(array $row, array $mapping)
+    protected function parseRow(array $row, array $mapping, array $encrypt)
     {
         $columns = new Collection();
         // apply mapping to a given row
         foreach ($mapping as $csv_index => $column_name) {
-            $column_value = ( array_key_exists($csv_index, $row) && isset( $row[$csv_index] ) && $row[$csv_index] !== '')
+            $column_value = (array_key_exists($csv_index, $row) && isset($row[$csv_index]) && $row[$csv_index] !== '')
                 ? $row[$csv_index]
                 : null;
+
+            if ( ! empty($encrypt)) {
+
+                if (in_array($column_name, $encrypt)) {
+                    $column_value = encrypt($column_value);
+                }
+            }
             $columns->put($column_name, $column_value);
         }
 
@@ -540,8 +586,7 @@ class CsvSeeder extends Seeder
     protected function cleanMapping(array $mapping)
     {
         $columns    = $mapping;
-        if (isset($columns[0])) // only needed if we use first column of line
-            $columns[0] = $this->stripUtf8Bom($columns[0]);
+        $columns[0] = $this->stripUtf8Bom($columns[0]);
 
         // Cull columns that don't exist in the database or were guarded by the model
         foreach ($columns as $index => $column) {
@@ -570,9 +615,9 @@ class CsvSeeder extends Seeder
      */
     protected function aliasColumns(Collection $columns)
     {
-        if (is_array($this->aliases) && !empty( $this->aliases )) {
+        if (is_array($this->aliases) && ! empty($this->aliases)) {
             foreach ($this->aliases as $csv_column => $alias_column) {
-                if ($columns->has($csv_column)) {
+                if ($columns->contains($csv_column)) {
                     $columns->put($alias_column, $columns->get($csv_column));
                     $columns->pull($csv_column);
                 }
@@ -587,14 +632,13 @@ class CsvSeeder extends Seeder
      */
     protected function hashColumns(Collection $columns)
     {
-        if (is_array($this->hashable) && !empty( $this->hashable )) {
+        if (is_array($this->hashable) && ! empty($this->hashable)) {
             foreach ($this->hashable as $hashable) {
-                if ($columns->contains($hashable)) {
+                if ($columns->has($hashable)) {
                     $columns->put($hashable, bcrypt($columns[$hashable]));
                 }
             }
         }
-
         return $columns;
     }
 
@@ -607,7 +651,7 @@ class CsvSeeder extends Seeder
      */
     protected function guardColumns(array $columns)
     {
-        if (!$this->model_guard || empty( $this->model )) {
+        if ( ! $this->model_guard || empty($this->model)) {
             return $columns;
         }
 
@@ -615,7 +659,7 @@ class CsvSeeder extends Seeder
 
         // filter out columns not allowed by the $fillable attribute
         if (method_exists($model, 'getFillable')) {
-            if (!empty( $fillable = $model->getFillable() )) {
+            if ( ! empty($fillable = $model->getFillable())) {
                 foreach ($columns as $index => $column) {
                     if (array_search($column, $fillable) === false) {
                         array_pull($columns, $index);
@@ -647,7 +691,7 @@ class CsvSeeder extends Seeder
     protected function resolveTable()
     {
         // try to resolve using model
-        if (empty( $this->table ) && !empty( $this->model )) {
+        if (empty($this->table) && ! empty($this->model)) {
             $model = $this->resolveModel();
             if ($model !== false) {
                 $this->table = method_exists($model, 'getTable')
@@ -657,7 +701,7 @@ class CsvSeeder extends Seeder
         }
 
         // try to resolve using filename
-        if (empty( $this->table ) && !empty( $this->filename )) {
+        if (empty($this->table) && ! empty($this->filename)) {
             $file = explode('/', $this->filename);
             $file = explode('.', $file[count($file) - 1]);
 
@@ -682,7 +726,7 @@ class CsvSeeder extends Seeder
 
         $this->table_columns = $columns;
 
-        return !empty( $columns );
+        return ! empty($columns);
     }
 
     /**
@@ -690,7 +734,9 @@ class CsvSeeder extends Seeder
      */
     protected function console($message, $style = null)
     {
-        if ($this->console_logs === false) return;
+        if ($this->console_logs === false) {
+            return;
+        }
 
         $message = $style ? "<$style>$message</$style>" : $message;
 
@@ -702,7 +748,9 @@ class CsvSeeder extends Seeder
      */
     protected function log($message, $level = 'info')
     {
-        if ($this->write_logs === false) return;
+        if ($this->write_logs === false) {
+            return;
+        }
 
         logger()->log($level, 'CSVSeeder: ' . $this->log_prefix . $message);
     }
